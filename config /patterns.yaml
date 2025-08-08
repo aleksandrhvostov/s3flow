@@ -1,0 +1,9 @@
+patterns:
+  - type: type_a
+    regex: '^(?P<pid>\d+)_(?P<so>\d+)filetypeA\.ext$'
+  - type: type_b
+    regex: '^(?P<pid>\d+)_(?P<so>\d+)_variantB\.ext$'
+  - type: type_c
+    regex: '^(?P<pid>\d+)_(?P<so>\d+)variant[UL]\.ext$'
+  - type: case_folder
+    regex: '^case(?P<pid>\d+)_(?P<so>\d+)$'

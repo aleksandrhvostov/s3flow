@@ -1,0 +1,54 @@
+aws:
+  profile: "aws_profile"     # or null to use env/default
+  region: null               # e.g. "us-east-1"
+
+s3:
+  bucket: "your-s3-bucket"
+  root_prefix: "your/root/prefix"   # used by some examples
+
+paths:
+  output_dir: "./outputs"
+  csv_1: "path/to/first.csv"
+  csv_2: "path/to/second.csv"
+  cases_folder: "path/to/cases_folder"
+  storage_manager_dir: "path/to/storage_manager_dir"
+
+examples:
+  mask:
+    prefix: "some/prefix/"
+    suffix: ".ext"
+
+  copy:
+    source_bucket: "source-bucket"
+    target_bucket: "target-bucket"
+    prefix: "source/prefix/"
+    suffix: ".ext"
+    prefix_dst: "dest/prefix/"
+
+  move:
+    source_bucket: "source-bucket"
+    target_bucket: "target-bucket"
+    prefix: "to/move/"
+    suffix: ".ext"
+    prefix_dst: "moved/"
+
+  sync:
+    source_bucket: "source-bucket"
+    target_bucket: "target-bucket"
+    prefix_src: "sync/src/"
+    prefix_dst: "sync/dst/"
+    delete_extra: false
+
+  csv_download:
+    csv_file: "path/to/input.csv"
+    column: "your_column"
+    s3_prefix: "files/prefix/"
+    max_workers: 8
+
+  copy_common_addon:
+    bucket: "your-s3-bucket"
+    src_root: "path/source_root/"          # e.g. "cases_src/"
+    ref_root: "path/reference_root/"       # e.g. "cases_ref/"
+    common_dst_root: "path/common_dst/"    # e.g. "cases_original/"
+    addon_dst_root: "path/addon_dst/"      # e.g. "cases_addon/"
+    max_workers: 10
