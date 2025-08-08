@@ -3,3 +3,4 @@ botocore
 typer
 pyyaml
 pandas
+tqdm
