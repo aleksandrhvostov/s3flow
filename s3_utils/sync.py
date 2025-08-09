@@ -1,114 +1,109 @@
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from __future__ import annotations
+from typing import List, Optional, Tuple, Dict
 from botocore.exceptions import ClientError
+from tqdm import tqdm
+
 from .core import list_objects
 from .copy import copy_object
 from .utils import relativize_keys
 
-try:
-    from tqdm import tqdm
-except Exception:
-    tqdm = None
 
-def _head_map(s3, bucket, keys):
-    out = {}
-    for k in keys:
-        try:
-            h = s3.head_object(Bucket=bucket, Key=k)
-            out[k] = (h.get("ETag", "").strip('"'), h.get("ContentLength", None))
-        except ClientError:
-            out[k] = (None, None)
-    return out
+def _chunked(iterable, size: int):
+    """Yield successive chunks from iterable of given size."""
+    for i in range(0, len(iterable), size):
+        yield iterable[i : i + size]
+
 
 def sync_prefix(
     s3_client,
-    source_bucket,
-    target_bucket,
-    prefix_src="",
-    prefix_dst="",
-    delete_extra=False,
-    compare_mode="name",
-    max_workers=8,
-    dry_run=False,
-    delete_batch_size=1000,
-    progress=False,
-):
-    if source_bucket == target_bucket:
-        s = prefix_src.rstrip("/")
-        d = prefix_dst.rstrip("/")
-        if s == d or s.startswith(d) or d.startswith(s):
-            raise ValueError("Refusing to sync: src/dst prefixes overlap in the same bucket")
-
-    src_keys = set(list_objects(s3_client, source_bucket, prefix=prefix_src))
-    dst_keys = set(list_objects(s3_client, target_bucket, prefix=prefix_dst))
+    source_bucket: str,
+    target_bucket: str,
+    prefix_src: str = "",
+    prefix_dst: str = "",
+    delete_extra: bool = False,
+    compare_mode: str = "key",  # future: etag/size
+    dry_run: bool = False,
+    max_workers: int = 8,       # reserved for parallel copy
+    progress: bool = False,
+) -> Dict[str, List]:
+    """
+    Sync all objects from source_bucket/prefix_src to target_bucket/prefix_dst.
+    Optionally delete extra objects in target that are not in source.
+    """
+    src_keys = list(list_objects(s3_client, source_bucket, prefix=prefix_src))
+    dst_keys = list(list_objects(s3_client, target_bucket, prefix=prefix_dst))
 
     src_rel = relativize_keys(src_keys, prefix_src)
     dst_rel = relativize_keys(dst_keys, prefix_dst)
 
-    to_copy_rel = src_rel - dst_rel
+    to_copy_rel = sorted(src_rel - dst_rel)
+    to_delete_rel = sorted(dst_rel - src_rel) if delete_extra else []
 
-    if compare_mode in ("etag", "size"):
-        common_rel = src_rel & dst_rel
-        if common_rel:
-            src_full = { (prefix_src + r if prefix_src else r): r for r in common_rel }
-            dst_full = { (prefix_dst + r if prefix_dst else r): r for r in common_rel }
+    copied: List[Tuple[str, str]] = []
+    errors_copy: List[str] = []
+    deleted: List[str] = []
+    errors_delete: List[str] = []
 
-            src_head = _head_map(s3_client, source_bucket, list(src_full.keys()))
-            dst_head = _head_map(s3_client, target_bucket, list(dst_full.keys()))
+    # Copy phase
+    copy_bar = tqdm(total=len(to_copy_rel), desc="Copy", unit="obj") if progress and to_copy_rel else None
 
-            for full_src, rel in src_full.items():
-                full_dst = (prefix_dst + rel) if prefix_dst else rel
-                s_meta = src_head.get(full_src, (None, None))
-                d_meta = dst_head.get(full_dst, (None, None))
-                if compare_mode == "etag" and s_meta[0] != d_meta[0]:
-                    to_copy_rel.add(rel)
-                elif compare_mode == "size" and s_meta[1] != d_meta[1]:
-                    to_copy_rel.add(rel)
-
-    copied = []
-    errors_copy = []
-    if to_copy_rel:
+    for rel in to_copy_rel:
+        src_key = f"{prefix_src}{rel}" if prefix_src else rel
+        dst_key = f"{prefix_dst}{rel}" if prefix_dst else rel
         if dry_run:
-            copied = [ (prefix_src + r if prefix_src else r, prefix_dst + r if prefix_dst else r) for r in sorted(to_copy_rel) ]
+            copied.append((src_key, dst_key))
         else:
-            bar = None
-            if progress and tqdm:
-                bar = tqdm(total=len(to_copy_rel), desc="Copy", unit="obj")
-            with ThreadPoolExecutor(max_workers=max_workers) as ex:
-                futs = []
-                for rel in to_copy_rel:
-                    src_key = (prefix_src + rel) if prefix_src else rel
-                    dst_key = (prefix_dst + rel) if prefix_dst else rel
-                    futs.append(ex.submit(copy_object, s3_client, source_bucket, src_key, target_bucket, dst_key))
-                for f in as_completed(futs):
-                    try:
-                        f.result()
-                    except Exception as e:
-                        errors_copy.append(str(e))
-                    finally:
-                        if bar:
-                            bar.update(1)
-            if bar:
-                bar.close()
-            copied = sorted(list(to_copy_rel))
+            try:
+                copy_object(s3_client, source_bucket, src_key, target_bucket, dst_key)
+                copied.append((src_key, dst_key))
+            except Exception as e:
+                errors_copy.append(f"{src_key} -> {dst_key}: {e}")
+        if copy_bar:
+            copy_bar.update(1)
 
-    deleted = []
-    errors_delete = []
-    if delete_extra:
-        extras_rel = dst_rel - src_rel
-        if extras_rel:
-            if dry_run:
-                deleted = [ (prefix_dst + r if prefix_dst else r) for r in extras_rel ]
-            else:
-                pass
+    if copy_bar:
+        copy_bar.close()
+
+    # Delete phase
+    delete_bar = tqdm(total=len(to_delete_rel), desc="Delete", unit="obj") if progress and to_delete_rel else None
+
+    if to_delete_rel:
+        if dry_run:
+            deleted.extend(to_delete_rel)
+            if delete_bar:
+                delete_bar.update(len(to_delete_rel))
+        else:
+            for chunk in _chunked(to_delete_rel, 1000):
+                objects = [{"Key": f"{prefix_dst}{rel}" if prefix_dst else rel} for rel in chunk]
+                try:
+                    resp = s3_client.delete_objects(Bucket=target_bucket, Delete={"Objects": objects})
+                    deleted.extend([obj["Key"] for obj in resp.get("Deleted", [])])
+                    for err in resp.get("Errors", []):
+                        errors_delete.append(f"{err['Key']}: {err['Code']} {err['Message']}")
+                except ClientError as e:
+                    for obj in objects:
+                        errors_delete.append(f"{obj['Key']}: {e}")
+                if delete_bar:
+                    delete_bar.update(len(chunk))
+
+    if delete_bar:
+        delete_bar.close()
 
     return {
         "copied": copied,
-        "deleted": deleted,
         "errors_copy": errors_copy,
+        "deleted": deleted,
         "errors_delete": errors_delete,
         "stats": {
-            "compare_mode": compare_mode,
-            "dry_run": dry_run,
+            "source_bucket": source_bucket,
+            "target_bucket": target_bucket,
+            "prefix_src": prefix_src,
+            "prefix_dst": prefix_dst,
             "delete_extra": delete_extra,
+            "dry_run": dry_run,
+            "total_src": len(src_keys),
+            "total_dst": len(dst_keys),
+            "to_copy": len(to_copy_rel),
+            "to_delete": len(to_delete_rel),
         },
     }
