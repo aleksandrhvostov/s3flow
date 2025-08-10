@@ -1,17 +1,26 @@
+# Python cache
 __pycache__/
 *.py[cod]
 *$py.class
+
+# Virtual envs
+.venv/
 venv/
 env/
-.venv/
 ENV/
-.idea/
-.vscode/
+
+# OS junk
 .DS_Store
 Thumbs.db
+
+# IDE settings
+.idea/
+.vscode/
+
+# Logs
 *.log
-*.swp
-*~
+
+# Environment variables
 .env
 *.env
-.pytest_cache/
+
