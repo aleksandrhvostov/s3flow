@@ -1,15 +1,18 @@
+from __future__ import annotations
 from s3_utils.core import get_s3_client
-from s3_utils.copy import copy_by_mask
-from s3_utils.utils import read_yaml
-
-CONFIG_PATH = "config/config.yaml"
+from s3_utils.move import move_by_mask
 
 if __name__ == "__main__":
-    cfg = read_yaml(CONFIG_PATH)
-    s3 = get_s3_client(aws_profile=cfg["aws"]["profile"], region_name=cfg["aws"]["region"])
-    ex = cfg["examples"]["copy"]
-    keys = copy_by_mask(
-        s3, ex["source_bucket"], ex["target_bucket"],
-        prefix=ex["prefix"], suffix=ex["suffix"], prefix_dst=ex["prefix_dst"]
+    s3 = get_s3_client()
+    res = move_by_mask(
+        s3,
+        source_bucket="my-source",
+        target_bucket="my-target",
+        prefix="tmp/",
+        prefix_dst="archive/tmp/",
+        progress=True,
+        delete_batch_size=1000,
     )
-    print(f"Copied {len(keys)} objects.")
+    print("Moved:", len(res["moved"]), "Deleted source:", len(res["deleted_source"]))
+    if res["errors_copy"] or res["errors_delete"]:
+        print("Errors(copy/delete):", len(res["errors_copy"]), "/", len(res["errors_delete"]))

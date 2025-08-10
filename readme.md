@@ -121,12 +121,60 @@ examples:
 If you also use PID/SO helpers, maintain config/patterns.yaml with your regexes.
 
 ## Usage
+### s3flow
+
+Small S3 toolkit: sync/copy/move/download with parallelism and optional progress bars.
+
+### Install
 ```bash
-python examples/download_example.py
-python examples/copy_example.py
-python examples/move_example.py
-python examples/sync_example.py
-python examples/download_from_csv_example.py
-python examples/copy_common_addon_example.py
+pip install -r requirements.txt
 ```
 
+### CLI
+#### Sync
+```bash
+python -m s3_utils.cli sync \
+  --source-bucket my-source \
+  --target-bucket my-target \
+  --prefix-src data/v1/ \
+  --prefix-dst data/v1/ \
+  --delete-extra \
+  --progress \
+  --verbose
+```
+--compare-mode name|etag|size
+
+--dry-run to preview actions
+
+--delete-extra removes keys in target missing in source (batched, ≤1000 per request)
+#### Download 
+```bash
+python -m s3_utils.cli download \
+  --bucket my-bucket \
+  --prefix images/ \
+  --suffix .jpg \
+  --dst-root ./downloads \
+  --keep-structure \
+  --progress
+```
+#### Move
+```bash
+python -m s3_utils.cli move \
+  --source-bucket my-source \
+  --target-bucket my-target \
+  --prefix tmp/ \
+  --prefix-dst archive/tmp/ \
+  --progress \
+  --delete-batch-size 1000
+```
+#### Python API
+```python 
+from s3_utils.core import get_s3_client
+from s3_utils.sync import sync_prefix
+
+s3 = get_s3_client()
+res = sync_prefix(s3, "src-bucket", "dst-bucket", "data/", "data/", delete_extra=True, progress=True)
+print(res["stats"])
+```
+#### Config 
+CLI reads config/config.yaml by default. Use --config to pass a different file.
