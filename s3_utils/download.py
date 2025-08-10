@@ -3,6 +3,7 @@ from typing import Iterable, List, Tuple, Optional, Dict, Literal
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from csv import DictWriter
+
 from tqdm import tqdm
 
 from .core import list_objects
@@ -13,7 +14,6 @@ from .utils import (
     set_mtime,
     compile_patterns,
 )
-
 
 SkipMode = Literal["none", "size"]
 
@@ -57,7 +57,6 @@ def _parallel_download(
 
     def _do(pair: Tuple[str, Path]) -> Tuple[str, Path] | None:
         key, dst = pair
-        # skip logic
         if skip_if != "none" and dst.exists():
             if skip_if == "size":
                 meta = get_s3_head(s3_client, bucket, key)
@@ -108,7 +107,6 @@ def download_by_mask(
     exclude: Optional[List[str]] = None,
     manifest_path: Optional[str | Path] = None,
 ) -> Dict[str, List]:
-    # list + filter keys
     keys = [k for k in list_objects(s3_client, bucket, prefix=prefix, suffix=suffix)]
     matcher = compile_patterns(includes=include, excludes=exclude) if (include or exclude) else (lambda _: True)
     keys = [k for k in keys if matcher(k)]
@@ -116,7 +114,6 @@ def download_by_mask(
     rel = relativize_keys(keys, prefix)
     dst_root = Path(dst_root)
 
-    # plan (key -> local path)
     pairs: List[Tuple[str, Path]] = []
     if keep_structure:
         for r in rel:
@@ -127,7 +124,6 @@ def download_by_mask(
             src_key = f"{prefix}{r}" if prefix else r
             pairs.append((src_key, dst_root / Path(r).name))
 
-    # dry-run: do not download, just return the plan
     if dry_run:
         return {
             "downloaded": [],
@@ -156,7 +152,6 @@ def download_by_mask(
         skip_if=skip_if,
     )
 
-    # optional manifest
     if manifest_path:
         ensure_dir(Path(manifest_path).parent)
         with open(manifest_path, "w", newline="", encoding="utf-8") as f:
